@@ -49,10 +49,9 @@ We quantified how many `account_id` references in the raw transaction files (`tr
 * **Sprint 2 Proposed Fix:** Implement a left-semi join against `accounts.csv` during Silver processing to isolate valid transactions. Mismatched transactions will be diverted to an operational quarantine table in the `ops` schema for review rather than being dropped or processed into the main ledger.
 
 ### Activity 4: Transaction Batch Overlap Analysis
-We quantified the physical overlap between `transactions_batch_01.csv` (historical base) and `transactions_batch_02.csv` (staging delta) by tracking identical business keys (`transaction_id`).
+We quantified the physical key collisions between `transactions_batch_01.csv` and `transactions_batch_02.csv` by tracking identical business keys (`transaction_id`) inside the raw Bronze layer.
 
-* **Overlapping Transaction IDs:** **12 duplicate transaction IDs**
+* **Overlapping Transaction IDs:** **15 duplicate transaction IDs**
 * **Row Variance Assessment:** **Mismatched (Differing Data Fields)**
-* **Definition:** A scan of the 12 overlapping IDs revealed that while the `transaction_id` matches perfectly across both files, the underlying data attributes—specifically the `amount` and `transaction_date` fields—differ completely between the two batches. 
-* **Sprint 2 Proposed Fix:** This indicates a severe system collision (key recycling or collision from upstream source applications). In Sprint 2, a simple append strategy will fail by creating primary key violations. We must implement a strict `MERGE INTO` statement using a business logic tie-breaker (e.g., matching on both `transaction_id` AND `transaction_date`, or favoring the staging batch as the most recent state) to prevent data corruption.
-
+* **Detailed Finding:** A cross-file join confirmed that there are exactly 15 transaction IDs that exist in both files. An evaluation of their attributes reveals that **the overlapping rows are NOT identical**. While they share the exact same `transaction_id`, the underlying columns—such as `amount`, `txn_timestamp`, and `account_id`—contain completely different values. This indicates a severe upstream system issue (e.g., key recycling or sequence counter resets).
+* **Sprint 2 Proposed Fix:** Because the data fields differ completely, a simple `MERGE INTO` table update statement using only `ON target.transaction_id = source.transaction_id` will destroy data by silently overwriting historical records. In Sprint 2, the cleaning pipeline must implement a compound business key (e.g., merging on both `transaction_id` AND `txn_timestamp`) or log these 15 collisions into a specialized operational quarantine table so that the historical ledger remains uncorrupted.
